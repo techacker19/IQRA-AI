@@ -44,9 +44,8 @@ app.post("/speak", async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini-tts",
-        voice: voice || "alloy",
-        input: text,
+        model: "gpt-4o-realtime", 
+        voice: voice || "verse",
       }),
     });
 
