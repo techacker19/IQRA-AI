@@ -1,106 +1,150 @@
-import { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
 
-function App() {
-  const [model, setModel] = useState("gpt-4o-realtime");
-  const [voice, setVoice] = useState("verse");
-  const [log, setLog] = useState([]);
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
-  // 🎙️ Create session
-  async function startSession() {
-    try {
-      const res = await fetch("http://localhost:8787/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, voice }),
-      });
+const App = () => {
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem("iqra_messages");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [listening, setListening] = useState(false);
+  const [userInput, setUserInput] = useState("");
+  const [iqraMood, setIqraMood] = useState("cheerful");
+  const synthRef = useRef(window.speechSynthesis);
 
-      const data = await res.json();
-      setLog((prev) => [...prev, "✅ Session started"]);
-      console.log("Session:", data);
-    } catch (err) {
-      console.error("Session error:", err);
-      setLog((prev) => [...prev, "❌ Failed to start session"]);
+  const OPENAI_API_KEY = "YOUR_OPENAI_API_KEY_HERE";
+
+  const toggleListening = () => {
+    if (!recognition) return alert("Speech Recognition not supported.");
+    if (listening) {
+      recognition.stop();
+      setListening(false);
+    } else {
+      recognition.start();
+      setListening(true);
     }
-  }
+  };
 
-  // 🔊 Test TTS
-  async function speakText() {
+  useEffect(() => {
+    if (!recognition) return;
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1][0].transcript;
+      addMessage("User", transcript);
+      getGPTResponse(transcript);
+    };
+
+    recognition.onerror = (e) => console.error("Speech recognition error:", e);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("iqra_messages", JSON.stringify(messages));
+  }, [messages]);
+
+  const addMessage = (sender, text) => {
+    setMessages((prev) => [...prev, { sender, text }]);
+  };
+
+  // Adjust mood based on keywords
+  const adjustMood = (text) => {
+    const lower = text.toLowerCase();
+    if (lower.includes("sad") || lower.includes("unhappy") || lower.includes("tired")) setIqraMood("empathetic");
+    else if (lower.includes("happy") || lower.includes("great") || lower.includes("awesome")) setIqraMood("cheerful");
+    else setIqraMood("neutral");
+  };
+
+  const getGPTResponse = async (text) => {
+    adjustMood(text);
+
+    const systemMessage = {
+      role: "system",
+      content: `You are Iqra, a friendly AI assistant with personality quirks. 
+      Current mood: ${iqraMood}. 
+      Use cheerful or empathetic expressions depending on mood. 
+      Remember recent messages for context. 
+      Use short interjections and small talk like "Absolutely!", "No worries!", "You got it, champ!".`
+    };
+
     try {
-      const res = await fetch("http://localhost:8787/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "Hello, I am Iqra!", voice }),
-      });
+      const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          messages: [systemMessage, { role: "user", content: text }],
+          temperature: 0.8,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.play();
-
-      setLog((prev) => [...prev, "🔊 Speaking…"]);
-    } catch (err) {
-      console.error("Speak error:", err);
-      setLog((prev) => [...prev, "❌ Failed to speak"]);
+      const gptText = response.data.choices[0].message.content;
+      addMessage("Iqra", gptText);
+      speakText(gptText);
+    } catch (error) {
+      console.error("GPT API error:", error);
+      const fallback = "Oops! Something went wrong, but I’m here to help!";
+      addMessage("Iqra", fallback);
+      speakText(fallback);
     }
-  }
+  };
+
+  const speakText = (text) => {
+    if (!synthRef.current) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+
+    // Mood-based pitch
+    utterance.pitch = iqraMood === "cheerful" ? 1.1 : iqraMood === "empathetic" ? 0.9 : 1;
+    utterance.rate = 1;
+    synthRef.current.speak(utterance);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!userInput) return;
+    addMessage("User", userInput);
+    getGPTResponse(userInput);
+    setUserInput("");
+  };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center p-6">
-      <h1 className="text-2xl font-bold mb-4">🎤 Iqra — Voice AI</h1>
+    <div style={{ maxWidth: 600, margin: "auto", padding: 20, fontFamily: "Arial, sans-serif" }}>
+      <h1>Iqra Realtime Voice AI</h1>
+      <p>Mood: <strong>{iqraMood}</strong></p>
+      <button onClick={toggleListening} style={{ marginBottom: 10 }}>
+        {listening ? "Stop Listening 🎤" : "Start Listening 🎤"}
+      </button>
 
-      {/* Model Selector */}
-      <div className="mb-4">
-        <label className="mr-2">Model:</label>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="text-black p-1 rounded"
-        >
-          <option value="gpt-4o-realtime">gpt-4o-realtime</option>
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-        </select>
+      <div style={{ border: "1px solid #ccc", padding: 10, height: 400, overflowY: "auto", marginBottom: 10 }}>
+        {messages.map((msg, idx) => (
+          <div key={idx} style={{ textAlign: msg.sender === "Iqra" ? "left" : "right", margin: "5px 0" }}>
+            <strong>{msg.sender}: </strong> {msg.text}
+          </div>
+        ))}
       </div>
 
-      {/* Voice Selector */}
-      <div className="mb-4">
-        <label className="mr-2">Voice:</label>
-        <select
-          value={voice}
-          onChange={(e) => setVoice(e.target.value)}
-          className="text-black p-1 rounded"
-        >
-          <option value="verse">verse</option>
-          <option value="alloy">alloy</option>
-        </select>
-      </div>
-
-      {/* Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={startSession}
-          className="bg-blue-600 px-4 py-2 rounded-lg"
-        >
-          Start Session
+      <form onSubmit={handleSubmit}>
+        <input
+          type="text"
+          value={userInput}
+          onChange={(e) => setUserInput(e.target.value)}
+          placeholder="Type your message..."
+          style={{ width: "80%", padding: 8 }}
+        />
+        <button type="submit" style={{ padding: 8, marginLeft: 5 }}>
+          Send
         </button>
-        <button
-          onClick={speakText}
-          className="bg-green-600 px-4 py-2 rounded-lg"
-        >
-          Speak Test
-        </button>
-      </div>
-
-      {/* Logs */}
-      <div className="mt-6 w-full max-w-md bg-gray-800 p-4 rounded-lg text-sm">
-        <h2 className="font-semibold mb-2">Log</h2>
-        <ul>
-          {log.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
-      </div>
+      </form>
     </div>
   );
-}
+};
 
 export default App;
