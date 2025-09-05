@@ -1,124 +1,106 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { useState } from "react";
 
 function App() {
-  const pcRef = useRef(null);
-  const micStreamRef = useRef(null);
-  const audioRef = useRef(null);
-  const [connected, setConnected] = useState(false);
-  const [log, setLog] = useState([]);
-  const [model, setModel] = useState("gpt-4o-realtime-preview-2024-12-17");
+  const [model, setModel] = useState("gpt-4o-realtime");
   const [voice, setVoice] = useState("verse");
+  const [log, setLog] = useState([]);
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8787";
-
-  function pushLog(x) {
-    setLog((prev) => [x, ...prev].slice(0, 200));
-  }
-
-  // 🔊 Speak text using backend TTS
-  async function speakText(text) {
+  // 🎙️ Create session
+  async function startSession() {
     try {
-      const res = await fetch(`${API_URL}/speak`, {
+      const res = await fetch("http://localhost:8787/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice }),
+        body: JSON.stringify({ model, voice }),
       });
+
+      const data = await res.json();
+      setLog((prev) => [...prev, "✅ Session started"]);
+      console.log("Session:", data);
+    } catch (err) {
+      console.error("Session error:", err);
+      setLog((prev) => [...prev, "❌ Failed to start session"]);
+    }
+  }
+
+  // 🔊 Test TTS
+  async function speakText() {
+    try {
+      const res = await fetch("http://localhost:8787/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Hello, I am Iqra!", voice }),
+      });
+
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.play();
+
+      setLog((prev) => [...prev, "🔊 Speaking…"]);
     } catch (err) {
-      console.error("TTS error:", err);
+      console.error("Speak error:", err);
+      setLog((prev) => [...prev, "❌ Failed to speak"]);
     }
   }
 
-  async function start() {
-    if (connected) return;
-    pushLog("Starting Iqra…");
-
-    const sessionRes = await fetch(`${API_URL}/session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, voice }),
-    });
-    const { client_secret } = await sessionRes.json();
-
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-
-    const audioEl = audioRef.current;
-    pc.ontrack = (e) => {
-      audioEl.srcObject = e.streams[0];
-    };
-
-    micStreamRef.current = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
-    micStreamRef.current
-      .getTracks()
-      .forEach((t) => pc.addTrack(t, micStreamRef.current));
-
-    const dc = pc.createDataChannel("oai-events");
-    dc.onopen = () => pushLog("Data channel open");
-
-    // 👇 When AI sends messages, speak them
-    dc.onmessage = (e) => {
-      pushLog(e.data);
-
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === "message" && data.text) {
-          speakText(data.text);
-        }
-      } catch {
-        speakText(e.data);
-      }
-    };
-
-    const offer = await pc.createOffer({ offerToReceiveAudio: true });
-    await pc.setLocalDescription(offer);
-
-    const baseUrl = "https://api.openai.com/v1/realtime";
-    const sdpRes = await fetch(`${baseUrl}?model=${encodeURIComponent(model)}`, {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
-        "Content-Type": "application/sdp",
-        Authorization: `Bearer ${client_secret?.value}`,
-      },
-    });
-
-    const answer = { type: "answer", sdp: await sdpRes.text() };
-    await pc.setRemoteDescription(answer);
-
-    setConnected(true);
-  }
-
-  function stop() {
-    try {
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch {}
-    try {
-      pcRef.current?.close();
-    } catch {}
-    setConnected(false);
-    pushLog("Stopped");
-  }
-
   return (
-    <div>
-      <h1>Iqra — Voice AI</h1>
-      <button onClick={connected ? stop : start}>
-        {connected ? "Stop" : "Start Iqra"}
-      </button>
-      <audio ref={audioRef} autoPlay></audio>
-      <div>
-        <h3>Log</h3>
-        <pre>{log.join("\n")}</pre>
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center p-6">
+      <h1 className="text-2xl font-bold mb-4">🎤 Iqra — Voice AI</h1>
+
+      {/* Model Selector */}
+      <div className="mb-4">
+        <label className="mr-2">Model:</label>
+        <select
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          className="text-black p-1 rounded"
+        >
+          <option value="gpt-4o-realtime">gpt-4o-realtime</option>
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+        </select>
+      </div>
+
+      {/* Voice Selector */}
+      <div className="mb-4">
+        <label className="mr-2">Voice:</label>
+        <select
+          value={voice}
+          onChange={(e) => setVoice(e.target.value)}
+          className="text-black p-1 rounded"
+        >
+          <option value="verse">verse</option>
+          <option value="alloy">alloy</option>
+        </select>
+      </div>
+
+      {/* Buttons */}
+      <div className="flex gap-4">
+        <button
+          onClick={startSession}
+          className="bg-blue-600 px-4 py-2 rounded-lg"
+        >
+          Start Session
+        </button>
+        <button
+          onClick={speakText}
+          className="bg-green-600 px-4 py-2 rounded-lg"
+        >
+          Speak Test
+        </button>
+      </div>
+
+      {/* Logs */}
+      <div className="mt-6 w-full max-w-md bg-gray-800 p-4 rounded-lg text-sm">
+        <h2 className="font-semibold mb-2">Log</h2>
+        <ul>
+          {log.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
       </div>
     </div>
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+export default App;
