@@ -18,10 +18,10 @@ app.post("/session", async (req, res) => {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: model || "gpt-4o-realtime-preview-2024-12-17",
-        voice: voice || "verse",
-      }),
+     body: JSON.stringify({
+  model: model || "gpt-4o-realtime-preview",   // ✅ updated
+  voice: voice || "verse",
+}),
     });
 
     const data = await response.json();
